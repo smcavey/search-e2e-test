@@ -6,6 +6,8 @@ FROM cypress/included:13.13.0 AS production
 
 USER root
 
+RUN apt-get update && apt-get install -y jq
+
 COPY --from=builder /usr/bin/yq /usr/local/bin/yq
 
 RUN mkdir -p /search-e2e/cypress_cache
