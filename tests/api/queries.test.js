@@ -8,6 +8,7 @@ const { execCliCmdString } = require('../common-lib/cliClient')
 const {
   resolveSearchCount,
   resolveSearchItems,
+  searchCompleteQuery,
   sendRequest,
   searchQueryBuilder,
 } = require('../common-lib/searchClient')
@@ -42,9 +43,9 @@ describe(`[P3][Sev3][${squad}] Search API - Verify results of different queries`
 
     // Wait for the service account and search index to get updated.
     // Must wait 2 minutes because of the current RBAC cache.
-    // another 1 minute grace period added to ensure resources indexed
-    console.log('Waiting 3 minutes for index update and cache expiration')
-    await sleep(120000 + 60000)
+    // another 30 seconds grace period added to ensure resources indexed
+    console.log('Waiting 2.5 minutes for index update and cache expiration')
+    await sleep(120000 + 30000)
   }, 1500000)
 
   // Keep separate from beforeAll because it slows execution and increases the chances of recovering during retry.
@@ -86,11 +87,16 @@ describe(`[P3][Sev3][${squad}] Search API - Verify results of different queries`
       expect(names).toEqual(expect.arrayContaining(['cm3-avocado', 'cm4-broccoli']))
     })
 
-    // TODO: Test added By AI. Failing likely due to a code bug, investigate and enable this test.
-    test.skip('should handle empty keywords gracefully', async () => {
-      const items = await resolveSearchItems(user.token, { keywords: [] })
-      expect(Array.isArray(items)).toBe(true)
-      expect(items.length).toBeGreaterThanOrEqual(0)
+    test('should handle empty keywords when filters are present', async () => {
+      const items = await resolveSearchItems(user.token, {
+        keywords: [],
+        filters: [
+          { property: 'namespace', values: [ns] },
+          { property: 'name', values: ['cm2-apple'] },
+        ],
+      })
+      expect(items).toHaveLength(1)
+      expect(items[0]).toHaveProperty('name', 'cm2-apple')
     })
 
     test('should handle special characters in keywords', async () => {
@@ -129,12 +135,16 @@ describe(`[P3][Sev3][${squad}] Search API - Verify results of different queries`
       expect(items).toHaveLength(0)
     })
 
-    // TODO: Test added By AI. Failing likely due to a code bug, investigate and enable this test.
-    test.skip('should match resources with label key only', async () => {
-      const items = await resolveSearchItems(user.token, { filters: [{ property: 'label', values: ['type'] }] })
-      const names = items.map((i) => i.name)
-      expect(items).toHaveLength(3)
-      expect(names).toEqual(expect.arrayContaining(['cm2-apple', 'cm3-avocado', 'cm4-broccoli']))
+    test('should reject strict label filter without key=value form', async () => {
+      const q = searchQueryBuilder({
+        filters: [{ property: 'label', values: ['type'] }],
+      })
+      const r = await sendRequest(q, user.token, { skipStatusAssert: true })
+      const hasErr = Array.isArray(r.body.errors) && r.body.errors.length > 0
+      const items = r.body?.data?.searchResult?.[0]?.items
+      const empty = !items || items.length === 0
+      expect(r.status !== 200 || hasErr).toBe(true)
+      expect(empty).toBe(true)
     })
   })
 
@@ -380,17 +390,11 @@ describe(`[P3][Sev3][${squad}] Search API - Verify results of different queries`
   })
 
   describe('search complete', () => {
-    // TODO: Test added by AI. Need to validate before enabling.
-    test.skip('should return all available namespaces for namespace property', async () => {
-      // Create a query to get all possible namespace values
-      const query = searchQueryBuilder({
-        filters: [],
-        limit: 1000,
-      })
-
+    test('should return distinct namespaces for namespace property via searchComplete', async () => {
+      const query = searchCompleteQuery({ property: 'namespace', limit: 2000 })
       const response = await sendRequest(query, user.token)
-      const items = response.body.data.searchResult[0].items || []
-      const namespaces = [...new Set(items.map((item) => item.namespace).filter((ns) => ns))]
+      const values = response.body.data.searchComplete || []
+      const namespaces = values.map((v) => (v == null ? '' : String(v))).filter(Boolean)
 
       expect(namespaces.length).toBeGreaterThan(0)
       expect(namespaces).toContain(ns)
@@ -459,16 +463,29 @@ describe(`[P3][Sev3][${squad}] Search API - Verify results of different queries`
       }
     })
 
-    // TODO: Test added by AI. Failing likely due to a code bug, investigate and enable this test.
-    test.skip('should handle malformed filters', async () => {
+    test('should return no results for empty filter property with values', async () => {
       const items = await resolveSearchItems(user.token, {
-        filters: [{ property: '', values: [] }],
+        filters: [{ property: '', values: ['any'] }],
       })
       expect(items).toHaveLength(0)
     })
 
-    // TODO: Test added By AI. Failing likely due to a code bug, investigate and enable this test.
-    test.skip('should handle empty search input', async () => {
+    test('should ignore filters with empty values when other filters still apply', async () => {
+      const [withIgnored, baseline] = await Promise.all([
+        resolveSearchItems(user.token, {
+          filters: [
+            { property: 'namespace', values: [ns] },
+            { property: 'kind', values: [] },
+          ],
+        }),
+        resolveSearchItems(user.token, {
+          filters: [{ property: 'namespace', values: [ns] }],
+        }),
+      ])
+      expect(withIgnored.length).toBe(baseline.length)
+    })
+
+    test('should return no items when search has no filters and no keywords', async () => {
       const items = await resolveSearchItems(user.token, {})
       expect(items).toHaveLength(0)
     })

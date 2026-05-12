@@ -77,6 +77,23 @@ function searchCountQuery({ keywords = [], filters = [], limit = 10000 }) {
 }
 
 /**
+ * GraphQL query for searchComplete (distinct values for a property, RBAC-scoped).
+ * @param {{ property: string, queryInput?: object|null, limit?: number }} opts
+ */
+function searchCompleteQuery({ property, queryInput = null, limit = 1000 }) {
+  return {
+    operationName: 'searchComplete',
+    variables: {
+      property,
+      query: queryInput,
+      limit,
+    },
+    query:
+      'query searchComplete($property: String!, $query: SearchInput, $limit: Int) {\n  searchComplete(property: $property, query: $query, limit: $limit)\n}\n',
+  }
+}
+
+/**
  * Collect metrics from the search requests to evaluate performace.
  * @object { time, token, firstRequest }
  */
@@ -87,6 +104,7 @@ const metrics = []
  * @param {*} query The query to send.
  * @param {string} token The validation token to use for the request.
  * @param {object} options Additional options for sending the request.
+ * @param {boolean} [options.skipStatusAssert] If true, do not assert HTTP 200 (for error-path tests).
  * @returns
  */
 function sendRequest(query, token, options = {}) {
@@ -96,32 +114,33 @@ function sendRequest(query, token, options = {}) {
   // Monitor how long search took to return results.
   const startTime = Date.now()
 
-  return request(searchApiRoute)
+  const req = request(searchApiRoute)
     .post('/searchapi/graphql')
     .send(query)
     .set({ Authorization: `Bearer ${token}` })
-    .expect(200)
-    .then((r) => {
-      const elapsed = Date.now() - startTime
+  const chain = options.skipStatusAssert ? req : req.expect(200)
 
-      if (elapsed > 10000) {
-        fail(`Search request took more than 10 seconds. (ElapsedTime: ${elapsed.toFixed(2)} ms)
-    operation: ${query.operationName}
-    variables: ${JSON.stringify(query.variables)}`)
-      } else if (elapsed > 1000 && !metrics.map((m) => m.token).includes(token)) {
-        // First request takes longer, so we'll log if it takes more than 2 seconds.
-        console.log(`Search request took more than 1 second. (ElapsedTime: ${elapsed.toFixed(2)} ms)
-    operation: ${query.operationName}
-    variables: ${JSON.stringify(query.variables)}`)
-      } else if (elapsed > 2000) {
-        console.log(`Initial search request took more than 2 seconds. (ElapsedTime: ${elapsed.toFixed(2)} ms)
-    operation: ${query.operationName}
-    variables: ${JSON.stringify(query.variables)}`)
-      }
+  return chain.then((r) => {
+    const elapsed = Date.now() - startTime
 
-      metrics.push({ time: elapsed, token, firstRequest: !metrics.map((m) => m.token).includes(token) })
-      return r
-    })
+    if (elapsed > 10000) {
+      fail(`Search request took more than 10 seconds. (ElapsedTime: ${elapsed.toFixed(2)} ms)
+    operation: ${query.operationName}
+    variables: ${JSON.stringify(query.variables)}`)
+    } else if (elapsed > 1000 && !metrics.map((m) => m.token).includes(token)) {
+      // First request takes longer, so we'll log if it takes more than 2 seconds.
+      console.log(`Search request took more than 1 second. (ElapsedTime: ${elapsed.toFixed(2)} ms)
+    operation: ${query.operationName}
+    variables: ${JSON.stringify(query.variables)}`)
+    } else if (elapsed > 2000) {
+      console.log(`Initial search request took more than 2 seconds. (ElapsedTime: ${elapsed.toFixed(2)} ms)
+    operation: ${query.operationName}
+    variables: ${JSON.stringify(query.variables)}`)
+    }
+
+    metrics.push({ time: elapsed, token, firstRequest: !metrics.map((m) => m.token).includes(token) })
+    return r
+  })
 }
 
 /**
@@ -176,11 +195,13 @@ async function resolveSearchCount(token, input) {
 async function resolveSearchItems(token, input) {
   const q = searchQueryBuilder(input)
   const r = await sendRequest(q, token)
-  return lodash.get(r, 'body.data.searchResult[0].items', [])
+  const items = lodash.get(r, 'body.data.searchResult[0].items', [])
+  return items == null ? [] : items
 }
 
 exports.getResourcesFromSearch = getResourcesFromSearch
 exports.resolveSearchCount = resolveSearchCount
 exports.resolveSearchItems = resolveSearchItems
+exports.searchCompleteQuery = searchCompleteQuery
 exports.searchQueryBuilder = searchQueryBuilder
 exports.sendRequest = sendRequest

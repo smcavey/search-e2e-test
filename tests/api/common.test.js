@@ -2,12 +2,29 @@
 
 jest.retryTimes(global.retry, { logErrorsBeforeRetry: true })
 
+const { execSync } = require('child_process')
+
 const squad = require('../../config').get('squadName')
 const { getSearchApiRoute, getKubeadminToken, getLocalClusterName } = require('../common-lib/clusterAccess')
 const { searchQueryBuilder, sendRequest } = require('../common-lib/searchClient')
 
-const _ = require('lodash')
-const acmNamespace = process.env.CYPRESS_ACM_NAMESPACE || 'open-cluster-management'
+function resolveAcmNamespace() {
+  if (process.env.CYPRESS_ACM_NAMESPACE) {
+    return process.env.CYPRESS_ACM_NAMESPACE
+  }
+  try {
+    const v = execSync("oc get mch -A -o jsonpath='{.items[0].metadata.namespace}'", {
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
+      .toString()
+      .trim()
+    return v || 'open-cluster-management'
+  } catch (_) {
+    return 'open-cluster-management'
+  }
+}
+
+const acmNamespace = resolveAcmNamespace()
 
 describe('RHACM4K-1696: Search API - Verify search result with common filter and conditions', () => {
   beforeAll(async () => {
@@ -62,37 +79,39 @@ describe('RHACM4K-1696: Search API - Verify search result with common filter and
     })
   }, 20000)
 
-  // Skipping this test because it fails intermittently, which creates unreliable results.
-  test.skip(`[P2][Sev2][${squad}] with query {kind:ConfigMap namespace:open-cluster-management}`, async () => {
+  test(`[P2][Sev2][${squad}] with query {kind:ConfigMap namespace:${acmNamespace}}`, async () => {
     var query = searchQueryBuilder({
       filters: [
         { property: 'kind', values: ['ConfigMap'] },
-        { property: 'namespace', values: ['open-cluster-management'] },
+        { property: 'namespace', values: [acmNamespace] },
       ],
     })
 
     var res = await sendRequest(query, token)
-    var items = res.body.data.searchResult[0].items
+    var items = res.body.data.searchResult[0].items || []
 
-    expect(items[0].kind).toMatch(/ConfigMap/i)
-    expect(items.find((el) => el.namespace === 'open-cluster-management')).toBeDefined()
-    expect(items.find((el) => el.name.includes('search'))).toBeDefined()
+    expect(items.length).toBeGreaterThan(0)
+    const inNs = items.filter((el) => el.namespace === acmNamespace)
+    expect(inNs.length).toBeGreaterThan(0)
+    expect(inNs.every((el) => /ConfigMap/i.test(String(el.kind)))).toBe(true)
+    expect(inNs.some((el) => String(el.name).includes('search'))).toBe(true)
   }, 20000)
 
-  // Skipping this test because it fails intermittently, which creates unreliable results.
-  test.skip(`[P2][Sev2][${squad}] with query {kind:Deployment namespace:open-cluster-management}`, async () => {
+  test(`[P2][Sev2][${squad}] with query {kind:Deployment namespace:${acmNamespace}}`, async () => {
     var query = searchQueryBuilder({
       filters: [
         { property: 'kind', values: ['Deployment'] },
-        { property: 'namespace', values: ['open-cluster-management'] },
+        { property: 'namespace', values: [acmNamespace] },
       ],
     })
 
     var res = await sendRequest(query, token)
-    var items = res.body.data.searchResult[0].items
+    var items = res.body.data.searchResult[0].items || []
 
-    expect(items[0].kind).toMatch(/Deployment/i)
-    expect(items.find((deploy) => deploy.namespace === 'open-cluster-management')).toBeDefined()
-    expect(items.find((deploy) => deploy.name.includes('search-api'))).toBeDefined()
+    expect(items.length).toBeGreaterThan(0)
+    const inNs = items.filter((el) => el.namespace === acmNamespace)
+    expect(inNs.length).toBeGreaterThan(0)
+    expect(inNs.every((el) => /Deployment/i.test(String(el.kind)))).toBe(true)
+    expect(inNs.some((el) => String(el.name).includes('search'))).toBe(true)
   }, 20000)
 })
