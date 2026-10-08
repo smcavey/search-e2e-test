@@ -80,7 +80,13 @@ describe(`[P2][Sev2][${squad}] Search API: Verify RBAC`, () => {
     oc patch deployment ${usr4Deploy} -n ${ns} -p '{"spec":{"template":{"spec":{"containers":[{"name":"busybox","imagePullPolicy":"IfNotPresent"}]}}}}'
     oc scale deployment ${usr4Deploy} -n ${ns} --replicas=5
     oc create configmap cm0 -n ${ns} --from-literal=key=cm0
-    oc create configmap cm1 -n ${ns} --from-literal=key=cm1`
+    oc create configmap cm1 -n ${ns} --from-literal=key=cm1
+    oc create clusterrole ${ns}-userpermissions --verb=list --resource=userpermissions.clusterview.open-cluster-management.io
+    oc create clusterrolebinding ${usr0}-userpermissions --clusterrole=${ns}-userpermissions --serviceaccount=${ns}:${usr0}
+    oc create clusterrolebinding ${usr1}-userpermissions --clusterrole=${ns}-userpermissions --serviceaccount=${ns}:${usr1}
+    oc create clusterrolebinding ${usr2}-userpermissions --clusterrole=${ns}-userpermissions --serviceaccount=${ns}:${usr2}
+    oc create clusterrolebinding ${usr3}-userpermissions --clusterrole=${ns}-userpermissions --serviceaccount=${ns}:${usr3}
+    oc create clusterrolebinding ${usr4}-userpermissions --clusterrole=${ns}-userpermissions --serviceaccount=${ns}:${usr4}`
 
     await execCliCmdString(setupCmds)
 
@@ -97,7 +103,13 @@ describe(`[P2][Sev2][${squad}] Search API: Verify RBAC`, () => {
     # export ns=search-rbac; export usr2Crb=search-user2-crb; export usr2Cr=search-user2-cr
     oc delete ns ${ns}
     oc delete clusterrolebinding ${usr2Crb}
-    oc delete clusterrole ${usr2Cr}`
+    oc delete clusterrole ${usr2Cr}
+    oc delete clusterrolebinding ${usr0}-userpermissions
+    oc delete clusterrolebinding ${usr1}-userpermissions
+    oc delete clusterrolebinding ${usr2}-userpermissions
+    oc delete clusterrolebinding ${usr3}-userpermissions
+    oc delete clusterrolebinding ${usr4}-userpermissions
+    oc delete clusterrole ${ns}-userpermissions`
 
     await execCliCmdString(teardownCmds)
   }, 10000)
